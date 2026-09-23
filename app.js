@@ -270,6 +270,7 @@ function writeError(e){
 function savePoint(id, data){
   if(!requireLogin()) return;
   const isNew=!points.has(id);
+  if(!isNew && !canEditPoint(points.get(id))){ toast("Só quem marcou ou um administrador pode alterar este ponto."); return; }
   const d=stamp(data,isNew);
   points.set(id,d); pendingIds.add(id); render();
   backend.set(id,d).catch(e=>{ writeError(e); });
@@ -280,7 +281,8 @@ function removePoint(id){
   points.delete(id); render();
   backend.remove(id).catch(e=>{ writeError(e); if(old){ points.set(id,old); render(); } });
 }
-function canDelete(p){ return canEdit() && (isAdmin || p.createdBy===user.uid); }
+function canEditPoint(p){ return canEdit() && (isAdmin || p.createdBy===user.uid); }
+function canDelete(p){ return canEditPoint(p); }
 function nearestExisting(latlng){
   let best=null;
   for(const [id,p] of points){ const d=map.distance(latlng,[p.lat,p.lng]); if(!best||d<best.d) best={id,d}; }
@@ -418,8 +420,8 @@ function decorate(id){
     meta.after(w);
   }
   const del=sheet.querySelector("#b-del");
-  if(del && !canDelete(p)){ const n=document.createElement("span"); n.className="note"; n.style.alignSelf="center"; n.textContent=!user?"Entre para editar.":!canEdit()?"Seu acesso ainda não foi aprovado.":"Só quem marcou ou um administrador pode excluir."; del.replaceWith(n); }
-  if(!canEdit()){ sheet.querySelectorAll(".seg button,.presets button,.lampset button,#b-move,#b-multi,#b-found,#c-nome,.chips button").forEach(b=>b.disabled=true); }
+  if(del && !canDelete(p)){ const n=document.createElement("span"); n.className="note"; n.style.alignSelf="center"; n.textContent=!user?"Entre para editar.":!canEdit()?"Seu acesso ainda não foi aprovado.":"Só quem marcou ou um administrador pode alterar ou excluir este ponto."; del.replaceWith(n); }
+  if(!canEditPoint(p)){ sheet.querySelectorAll(".seg button,.presets button,.lampset button,#b-move,#b-multi,#b-found,#c-nome,.chips button").forEach(b=>b.disabled=true); }
 }
 function openPointInner(id, refresh, focusName){
   if(movingId) return;
@@ -769,7 +771,7 @@ function openHelp(){
       ${row("missing","Trecho de calçada ou caminho usado à noite, escuro e sem poste, onde deveria haver um.")}
       ${row("custom","Qualquer outra coisa relevante, com nome livre (ponto de apoio, câmera, buraco na calçada...).")}
     </ul>
-    <p class="note"><b>Dicas:</b> marque à noite, depois das 19 h. Antes de marcar, veja se o poste já não está no mapa: se estiver, toque nele e atualize a condição. O botão ◎ mostra onde você está (use com cuidado: o GPS erra alguns metros).</p>
+    <p class="note"><b>Dicas:</b> marque à noite, depois das 19 h. Antes de marcar, veja se o poste já não está no mapa. Se você mesmo marcou, toque nele para atualizar. Se foi outra pessoa e a condição mudou, avise o responsável pelo projeto. O botão ◎ mostra onde você está (use com cuidado: o GPS erra alguns metros).</p>
     <div class="row"><button class="btn primary" id="h-close">Entendi</button></div>
   `,"help");
   scrim.hidden=false;
