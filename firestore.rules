@@ -1,0 +1,88 @@
+rules_version = '2';
+
+// Regras de segurança do Luz no Campus (Cloud Firestore).
+// Cole este conteúdo em: Console do Firebase > Firestore Database > Regras > Publicar.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    // Administradores: documentos na coleção "admins" cujo ID é o UID da pessoa.
+    function isAdmin() {
+      return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Quem pode marcar: administradores e pessoas com pedido APROVADO
+    // (documento usuarios/{uid} com status "aprovado", decidido por um administrador no app).
+    function isApproved() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
+        && get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.status == 'aprovado';
+    }
+    function canWrite() { return isAdmin() || isApproved(); }
+
+    // Opcional: aceitar pedidos SOMENTE de e-mails da UFSCar. Troque o "return true"
+    // da função abaixo por:
+    //   return request.auth.token.email_verified == true
+    //          && request.auth.token.email.matches('.*[@.]ufscar[.]br$');
+    function emailAllowed() { return true; }
+
+    function validPoint(d) {
+      return d.keys().hasOnly(['lat','lng','status','lamps','nome','createdAt','updatedAt','history',
+                               'createdBy','createdByName','updatedBy','updatedByName'])
+        && d.lat is number && d.lng is number
+        && d.lat > -22.05 && d.lat < -21.93 && d.lng > -47.95 && d.lng < -47.83
+        && d.status in ['ok','weak','out','multi','missing','custom']
+        && d.createdAt is number && d.updatedAt is number
+        && (!('lamps' in d) || (d.lamps is list && d.lamps.size() <= 4))
+        && (!('nome' in d) || (d.nome is string && d.nome.size() <= 80))
+        && (!('history' in d) || (d.history is list && d.history.size() <= 30))
+        && d.createdByName is string && d.createdByName.size() <= 80
+        && d.updatedByName is string && d.updatedByName.size() <= 80;
+    }
+
+    match /postes/{id} {
+      // Qualquer pessoa pode VER o mapa (inclusive sem login), o que permite
+      // compartilhar o link com a gestão. Para exigir login também para ver,
+      // troque "true" por "signedIn()".
+      allow read: if true;
+
+      allow create: if canWrite() && validPoint(request.resource.data)
+                    && request.resource.data.createdBy == request.auth.uid
+                    && request.resource.data.updatedBy == request.auth.uid;
+
+      // Qualquer colaborador pode atualizar um ponto (ex.: a lâmpada foi trocada),
+      // mas não pode mudar quem o criou.
+      allow update: if canWrite() && validPoint(request.resource.data)
+                    && request.resource.data.createdBy == resource.data.createdBy
+                    && request.resource.data.createdAt == resource.data.createdAt
+                    && request.resource.data.updatedBy == request.auth.uid;
+
+      // Excluir: só quem marcou (e continua aprovado) ou um administrador.
+      allow delete: if isAdmin() || (isApproved() && resource.data.createdBy == request.auth.uid);
+    }
+
+    // Pedidos de acesso. Cada pessoa cria o PRÓPRIO pedido, sempre como "pendente".
+    // Só administradores veem todos os pedidos e mudam o status.
+    match /usuarios/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow create: if signedIn() && request.auth.uid == uid && emailAllowed()
+                    && request.resource.data.keys().hasOnly(['nome','email','mensagem','status','pedidoEm'])
+                    && request.resource.data.status == 'pendente'
+                    && request.resource.data.nome is string && request.resource.data.nome.size() <= 80
+                    && request.resource.data.email is string && request.resource.data.email.size() <= 120
+                    && request.resource.data.mensagem is string && request.resource.data.mensagem.size() <= 200
+                    && request.resource.data.pedidoEm is number;
+      allow update: if isAdmin()
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','decididoEm','decididoPor'])
+                    && request.resource.data.status in ['pendente','aprovado','recusado'];
+      allow delete: if isAdmin();
+    }
+
+    match /admins/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false; // administradores são definidos pelo Console
+    }
+  }
+}
