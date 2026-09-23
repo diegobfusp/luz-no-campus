@@ -70,6 +70,10 @@ const tilesSat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/servic
 const BASES = {"Noturno":baseVector,"Ruas (OpenStreetMap)":tilesOSM,"Satélite":tilesSat};
 L.control.layers(BASES,null,{position:"topright",collapsed:true}).addTo(map);
 let baseMode="Noturno";
+// marcadores menores quando o mapa está afastado
+const ZOOM_MID=16.5, ZOOM_FULL=17.5;
+function zoomClass(){ const z=map.getZoom(), c=map.getContainer(); c.classList.toggle("z-far",z<ZOOM_MID); c.classList.toggle("z-mid",z>=ZOOM_MID&&z<ZOOM_FULL); }
+map.on("zoomend",zoomClass); zoomClass();
 map.on("baselayerchange",e=>{ baseMode=e.name; document.body.dataset.base = baseMode==="Noturno"?"night":baseMode==="Satélite"?"sat":"osm"; if(typeof placeLabels==="function") placeLabels(); });
 document.body.dataset.base="night";
 const baseRenderer = L.canvas({padding:0.5});
@@ -210,7 +214,10 @@ let selectedId = null, armedStatus = null, movingId = null;
 function iconFor(p, id){
   const cls = ["pin-icon","m-"+p.status]; if(pendingIds.has(id)) cls.push("pending"); if(movingId===id) cls.push("moving");
   const tag = p.status==="custom" ? `<span class="pin-tag${p.nome?"":" empty"}">${esc(p.nome||"sem nome")}</span>` : "";
-  return L.divIcon({className:cls.join(" "),html:lampSVG(p.status,"pin",lampsOf(p))+tag,iconSize:p.status==="multi"?[40,40]:[30,40],iconAnchor:p.status==="multi"?[20,39]:[15,39]});
+  const ls=lampsOf(p);
+  const miniColor = p.status==="custom"?STATUS.custom.color : p.status==="missing"?"transparent" : ls.includes("out")?STATUS.out.color : ls.includes("weak")?STATUS.weak.color : STATUS.ok.color;
+  const mini=`<i class="mini mini-${p.status}" style="--mc:${miniColor}"></i>`;
+  return L.divIcon({className:cls.join(" "),html:lampSVG(p.status,"pin",ls)+tag+mini,iconSize:p.status==="multi"?[40,40]:[30,40],iconAnchor:p.status==="multi"?[20,39]:[15,39]});
 }
 function render(){
   // markers
@@ -219,7 +226,7 @@ function render(){
     let m = markers.get(id);
     if(!m){
       m = L.marker([p.lat,p.lng],{icon:iconFor(p,id),draggable:false,keyboard:true,title:p.status==="custom"?(p.nome||"Outro marcador"):p.status==="multi"?describeLamps(lampsOf(p)):STATUS[p.status].label,riseOnHover:true});
-      m.on("click",()=>openPoint(id));
+      m.on("click",()=>{ if(map.getZoom()<ZOOM_MID){ map.setView(m.getLatLng(),Math.max(map.getZoom()+2,18)); return; } openPoint(id); });
       m.on("dragend",()=>{ const ll=m.getLatLng(); savePoint(id,{...points.get(id),lat:+ll.lat.toFixed(7),lng:+ll.lng.toFixed(7),updatedAt:Date.now()}); });
       m.addTo(map); markers.set(id,m);
     } else {
